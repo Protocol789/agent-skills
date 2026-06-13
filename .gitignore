@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node (screenshot.js pulls in playwright)
+node_modules/
+.npm/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets — never commit cached credentials
+*.env
+.env
+.env.*
+!.env.example
+
+# Build / dist
+dist/
+build/
