@@ -1,7 +1,22 @@
 # agent-skills
 
-A small, centralized collection of agent skills — version-controlled, portable,
-and free of any environment-specific credentials.
+A small, centralized collection of [Hermes Agent](https://hermes-agent.nousresearch.com)
+skills — version-controlled, portable, and free of any
+environment-specific credentials. Each skill is a self-contained
+directory under `devops/<category>/<skill-name>/` with a `SKILL.md`
+following the Hermes skill-authoring guide.
+
+## Install as a Hermes skills tap
+
+```bash
+# Add this repo as a tap
+hermes skills tap add <owner>/agent-skills
+
+# Install a specific skill
+hermes skills install patchmon-api
+```
+
+Or copy a single skill directory into `~/.hermes/skills/devops/`.
 
 ## Contents
 
@@ -13,6 +28,10 @@ and free of any environment-specific credentials.
 └── devops/
     └── patchmon-api/
         ├── SKILL.md
+        ├── README.md
+        ├── references/
+        │   ├── endpoints.md
+        │   └── discrepancies.md
         └── scripts/
             ├── patchmon.py
             └── screenshot.js
@@ -31,7 +50,9 @@ when a visual confirmation is requested (text-mode browser tools cannot
 capture images).
 
 See `devops/patchmon-api/SKILL.md` for full usage, the two-tier auth
-model, polling semantics, and known API gotchas.
+model, polling semantics, and known API gotchas. The skill declares
+its required environment variables in the `SKILL.md` frontmatter —
+Hermes will prompt for missing values when the skill is loaded.
 
 ## Prerequisites
 

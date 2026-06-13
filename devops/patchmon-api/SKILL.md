@@ -1,266 +1,180 @@
 ---
 name: patchmon-api
-description: >
-  Query and patch Linux servers managed by PatchMon (e.g. patchmon.net).
-  Use this skill whenever the user asks to list hosts, see outstanding updates,
-  trigger patching, dry-run a patch, approve a patch, check a patch run's status,
-  or stop a run. Trigger on mentions of "patchmon", "patch the server(s)",
-  "Linux updates", "apt updates on host X", "kick off patching",
-  "what needs patching", or similar — even if the user doesn't say "PatchMon"
-  explicitly, if the context is a managed Linux fleet.
-triggers:
-  - patchmon
-  - patchmon-api
-  - patchmon\.net
-  - linux patch management
-  - query patches
-  - initiate patching
-  - patching runs
-  - patch the servers
-  - linux updates
-  - apt updates
-  - what needs patching
-  - kick off patching
+description: Query and patch Linux servers managed by PatchMon (patchmon.net)
+version: 1.0.0
+author: Daniel
+license: MIT
+platforms: [linux]
+metadata:
+  hermes:
+    tags: [DevOps, Linux, PatchManagement, PatchMon, API]
+    related_skills: []
+required_environment_variables:
+  - name: PATCHMON_URL
+    prompt: "PatchMon base URL (e.g. https://patchmon.example.com)"
+    help: "The base URL of the PatchMon instance you want to manage."
+    required_for: "All API calls"
+  - name: PATCHMON_USERNAME
+    prompt: "PatchMon username"
+    help: "An account on your PatchMon instance. Used to mint a Bearer JWT for action-capable endpoints."
+    required_for: "Action-capable calls (patch, approve, stop)"
+  - name: PATCHMON_PASSWORD
+    prompt: "PatchMon password"
+    help: "Password for the account above. Prefer setting PATCHMON_TOKEN instead if you already have a valid JWT."
+    required_for: "Minting a Bearer JWT when PATCHMON_TOKEN is not set"
+  - name: PATCHMON_KEY
+    prompt: "PatchMon Integration API key (read-only)"
+    help: "Scoped Basic-Auth key from the PatchMon UI. Optional — falls back to Bearer auth if unset."
+    required_for: "Read-only endpoints via Integration API (outdated, hosts with stats)"
+  - name: PATCHMON_SECRET
+    prompt: "PatchMon Integration API secret"
+    help: "Paired with PATCHMON_KEY for Basic Auth."
+    required_for: "Read-only endpoints via Integration API"
 ---
 
 # PatchMon API
 
-PatchMon manages Linux patching. This skill is for **doing things** — listing
-hosts, triggering patches, monitoring runs. The hard parts (auth dance, polling,
-dry-run-only-works-with-packages, approve-returns-new-id) are wrapped in
-`scripts/patchmon.py`. Use the script; do not hand-roll curl.
+PatchMon is a Linux patch-management service. This skill wraps its
+two-tier API (read-only Integration API + action-capable Application
+API) in a small CLI, plus a Playwright-based dashboard screenshot
+helper. Use the script; do not hand-roll curl.
 
-## Quick start
+## When to use
 
-Credentials are **pre-loaded in the environment** for this Hermes deployment:
-`PATCHMON_URL`, `PATCHMON_USERNAME`, `PATCHMON_PASSWORD`, `PATCHMON_KEY`, `PATCHMON_SECRET` are all set. No need to export or provide them — just run the commands.
+- Listing managed hosts, host groups, or host stats
+- Inspecting outstanding package updates on a host
+- Triggering a patch run (full fleet, or specific packages)
+- Dry-running a patch and approving it after review
+- Polling a run to terminal status, stopping a queued run
+- Capturing a visual screenshot of the PatchMon dashboard
+
+The bundled script handles login, polling, and SPA-HTML detection
+automatically. Every subcommand prints JSON to stdout; errors print
+JSON to stderr and exit non-zero.
+
+## Quick reference
 
 ```bash
-# All auth env vars are already set. Just run:
+# All paths below are substituted at skill-load time; do not hardcode.
+SKILL_DIR="${HERMES_SKILL_DIR:-$(dirname "$0")/..}"
+cd "$SKILL_DIR"
+
+# All PATCHMON_* env vars are passed through from the host. Run:
 python3 scripts/patchmon.py hosts              # list hosts
 python3 scripts/patchmon.py outdated <host_id> # see what's pending
 python3 scripts/patchmon.py patch <host_id>    # patch_all + poll to done
 python3 scripts/patchmon.py runs --active      # what's running now
 ```
 
-Manual auth override (only if needed):
-```bash
-# Read-only queries via Integration API token pair:
-export PATCHMON_KEY="..."
-export PATCHMON_SECRET="..."
+The script accepts `--username`/`--password`/`--token`/`--base-url`
+flags as overrides. See `references/endpoints.md` for the full
+endpoint catalog and `references/discrepancies.md` for known docs
+that disagree with the deployed instance.
 
-# Action-capable Bearer token:
-export PATCHMON_TOKEN="$(python3 scripts/patchmon.py --username "$PATCHMON_USERNAME" --password "$PATCHMON_PASSWORD" login | jq -r .token)"
-```
+## Procedure
 
-The script handles login, polling, and SPA-HTML detection automatically. Every
-command prints JSON to stdout; errors print JSON to stderr and exit non-zero.
+1. **Confirm credentials are present.** Hermes will prompt for any
+   missing `PATCHMON_*` variables listed in the frontmatter. If you
+   skipped the prompts, set them manually in your shell before
+   proceeding, or pass the corresponding `--flag` to the script.
+2. **Identify what to patch.**
 
-## The two-tier auth model (one-liner)
+   ```bash
+   python3 scripts/patchmon.py hosts
+   # Pick host_id(s) with non-zero updates_count
+   python3 scripts/patchmon.py outdated "$HOST_ID"
+   ```
+3. **Trigger a patch run.**
 
-- **Integration API** (`/api/v1/api/...`) is read-only, uses Basic Auth with a
-  key/secret pair from the UI. Cannot trigger patches.
-- **Application API** (`/api/v1/...`) is action-capable, uses a Bearer JWT from
-  `POST /api/v1/auth/login`. JWT expires in 1 hour.
+   ```bash
+   # Safe path — dry-run on specific packages
+   python3 scripts/patchmon.py patch "$HOST_ID" --dry-run --packages curl openssl
 
-For anything that **changes state**, you need the Bearer token. The script gets
-one automatically when you set `PATCHMON_USERNAME`/`PATCHMON_PASSWORD`.
+   # Fast path — patch_all, applies immediately
+   python3 scripts/patchmon.py patch "$HOST_ID"
+   ```
+4. **If you dry-ran, approve the run.** `approve` returns a NEW
+   `patch_run_id` for the live run — track that one, not the dry-run
+   id.
 
-## The patch workflow
+   ```bash
+   python3 scripts/patchmon.py approve "$DRY_RUN_ID"
+   ```
+5. **Poll to terminal status.** `patch` and `approve` poll
+   automatically (use `--no-wait` to skip).
+6. **Inspect failures.** `run <run_id>` returns the full run object
+   including `shell_output` and `error_message`. `apt-get update
+   failed: exit status 100` and similar are usually transient — retry.
 
-```
-┌────────────────┬
-│   hosts         │  ←  who needs patching?
-└──────────┬──────────┘
-              │
-       ┌──────────┬──────────┐
-       │ outdated <id> │  ←  inspect a specific host
-       └──────────┬──────────┘
-                    │
-     ┌────────────────┬───────────────────┐
-safe path  │                 │  fast path
-     │      patch <id> --dry-run      patch <id>
-     │      --packages a b c          (patch_all, applies immediately)
-     │                 │  │
-     │       review shell_output      │
-     │                 │  │
-     └─────────────┬────────────┘
-              approve <run_id> → new run id ──────┬
-                                                    │
-                                          poll to terminal status
-                                                    │
-                                          status: completed / failed
-                                                    │
-                                          check needs_reboot
-```
+## Pitfalls
 
-The script's `patch` subcommand polls automatically (use `--no-wait` to skip).
-The `approve` subcommand approves the dry-run **and** polls the resulting live
-run.
+The six that actually bite:
 
-## Run statuses
+1. **`host_id`, not `host_ids`.** The trigger endpoint takes a single
+   host per call. Loop in the script (or your shell).
+2. **`dry_run` requires `patch_type: "patch_package"`.** The script
+   rejects `--dry-run` combined with `patch_all` automatically.
+3. **`approve` returns a new `patch_run_id`.** Don't track the
+   dry-run id; the script does this for you.
+4. **No streaming.** `shell_output` is only populated after terminal
+   status. The script polls `GET /patching/runs/{id}` every ~5s.
+5. **JWT expires in 1 hour.** If you saved a `PATCHMON_TOKEN` and it
+   returns `Invalid token`, drop it and let the script re-login from
+   username/password.
+6. **`outdated` requires Integration API Basic Auth.** It calls
+   `_basic_headers()` which needs `PATCHMON_KEY` + `PATCHMON_SECRET`.
+   If you only have app credentials, use the Application API
+   fallback: `GET /api/v1/dashboard/packages` with a Bearer token —
+   returns all outdated packages grouped by host.
 
-| Status | Meaning |
-|---|---|
-| `queued` | Waiting for agent slot |
-| `validated` | Dry-run completed successfully; ready for approval |
-| `approved` | Dry-run was approved; a new live run was spawned |
-| `completed` | Live patch run finished without errors |
-| `failed` | Live patch run encountered an error (see `error_message`) |
-| `cancelled` | Run was stopped via `stop` subcommand |
+### Data freshness caveat
 
-## When to use dry-run
+The Integration API reflects the **last agent check-in**. A stale
+host (`isStale: true`) may show 0 pending updates even when the
+dashboard shows many. Use the Application API
+`GET /api/v1/dashboard/packages` for an always-current view.
 
-- **Skip dry-run** for routine `patch_all` on hosts you trust. Fast path.
-- **Use dry-run** when patching specific packages on production hosts, or
-  when the host has had failures recently. Dry-run only works with `--packages`,
-  never with `patch_all`.
+### Token cache
 
-## Inspecting failures
+`patchmon.py` persists a freshly-minted JWT to
+`${XDG_CACHE_HOME:-$HOME/.cache}/patchmon/token` (parent dir mode
+0700, file mode 0600) so repeated invocations within an hour don't
+re-authenticate. Pass `--token` to bypass the cache, or set
+`PATCHMON_TOKEN` to override it.
 
-```bash
-python3 scripts/patchmon.py run <run_id>   # full run object, incl. shell_output
-python3 scripts/patchmon.py runs           # recent runs, see what failed
-```
+## Verification
 
-`apt-get update failed: exit status 100` and similar are usually transient repo
-issues — re-trigger the patch. If a kernel updated, check `needs_reboot` in
-the host stats.
-
-## Critical gotchas (the six that actually bite)
-
-1. **`host_id`, not `host_ids`.** The trigger endpoint takes a single host per
-   call. Loop in Python; the script does this for you per invocation.
-2. **`dry_run` requires `patch_type: "patch_package"`.** Will reject if combined
-   with `patch_all`. The script enforces this.
-3. **`approve` returns a NEW `patch_run_id`** for the live run. Track that new
-   ID, not the original dry-run ID. The script does this transparently.
-4. **No streaming.** The agent's `shell_output` is only populated after the
-   run reaches a terminal status. Poll `GET /patching/runs/{id}` every ~5s; the
-   script does this.
-5. **JWT expires in 1 hour.** If a saved `PATCHMON_TOKEN` returns `Invalid
-   token`, drop it and let the script re-login from username/password.
-6. **`outdated` requires Integration API Basic Auth.** The `outdated` subcommand
-   calls `_basic_headers()` which requires `PATCHMON_KEY`/`PATCHMON_SECRET`
-   (scoped token pair from the PatchMon UI). It does NOT work with
-   username/password Bearer auth. If you only have app credentials, use the
-   Application API fallback: `GET /api/v1/dashboard/packages` with a Bearer
-   token — returns all outdated packages grouped by host with
-   `affectedHosts[].{friendlyName,currentVersion,availableVersion,isSecurityUpdate}`.
-
-## Env var casing and auth setup
-
-The script expects **uppercase** env vars: `PATCHMON_USERNAME`,
-`PATCHMON_PASSWORD`, `PATCHMON_KEY`, `PATCHMON_SECRET`. If your shell has them
-under different names, alias them before invoking the script, or pass
-`--username` / `--password` / `--token` explicitly.
+After any state-changing call, confirm the action landed:
 
 ```bash
-# Example: remap to the names the script expects
-export PATCHMON_USERNAME="${MY_PM_USER:-}"
-export PATCHMON_PASSWORD="${MY_PM_PASS:-}"
-export PATCHMON_KEY="${MY_PM_KEY:-}"
-export PATCHMON_SECRET="${MY_PM_SECRET:-}"
+python3 scripts/patchmon.py run "$NEW_RUN_ID" | jq '.status, .error_message'
 ```
 
-## Data freshness caveat
+`status` should be `completed`. If `failed`, inspect
+`error_message` and `shell_output`. If the kernel updated, check
+`needs_reboot` in the host stats from `hosts --hostgroup <name>`.
 
-The Integration API (`outdated`, `hosts` with stats) reflects the **last agent
-check-in**. If a host is stale (`isStale: true`), `outdated` may return 0
-packages even when the dashboard shows many pending updates. Use the Application
-API `GET /api/v1/dashboard/packages` (Bearer auth) for a host-aggregated view
-that is always current — it pulls from the dashboard database, not the agent's
-last report.
-
-## `hosts` dual-auth behavior
-
-The `hosts` subcommand **prefers Integration API** when `PATCHMON_KEY` and
-`PATCHMON_SECRET` are available (cheaper, no token expiry). It falls back to
-Application API (`PATCHMON_USERNAME`/`PATCHMON_PASSWORD`) automatically. Both
-paths return similar data, but the Integration API path includes richer fields
-via `?include=stats`.
-
-## Minting a token manually
-
-The `login` subcommand accepts credentials as **global arguments** (before the
-subcommand), not after it:
+For a visual confirmation, use the screenshot helper. It logs in
+with `PATCHMON_USERNAME`/`PATCHMON_PASSWORD` and saves a 1920×1080
+PNG; emit `[[as_document]]` somewhere in your response so the
+gateway delivers the file as a downloadable attachment instead of an
+inline preview.
 
 ```bash
-# Correct:
-python3 scripts/patchmon.py --username "$PATCHMON_USERNAME" --password "$PATCHMON_PASSWORD" login
+# First-time setup (Playwright + Chromium, ~300 MB into $PWD/node_modules):
+npm install playwright && npx playwright install chromium
 
-# Wrong (fails with "unrecognized arguments"):
-python3 scripts/patchmon.py login --username "$PATCHMON_USERNAME" --password "$PATCHMON_PASSWORD"
+# Capture the dashboard:
+node scripts/screenshot.js /tmp/patchmon_dash.png
 ```
 
-## Direct curl (only when the script can't be used)
+Output: `/tmp/patchmon_dash.png` → include `[[as_document]]` in the
+reply to deliver it.
 
-Just the two endpoints worth memorising:
+## Notes
 
-```bash
-# Mint a token
-TOKEN=$(curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{"username":"...","password":"..."}' \
-  "$PATCHMON_URL/api/v1/auth/login" | jq -r .token)
-
-# Trigger
-curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"host_id":"<uuid>","patch_type":"patch_all","dry_run":false}' \
-  "$PATCHMON_URL/api/v1/patching/trigger"
-```
-
-## Browser screenshots
-
-When you need a **visual dashboard screenshot** (not API data), use the Playwright-based screenshot script. The Hermes `browser_*` tools cannot capture screenshots — they only provide text snapshots and interaction.
-
-```bash
-# Check if playwright is installed first; if not:
-cd /tmp && npm install playwright && npx playwright install chromium
-
-# Then take the screenshot:
-node scripts/screenshot.js [output_path]
-```
-
-The script logs in automatically using `PATCHMON_USERNAME`/`PATCHMON_PASSWORD`, waits 3 seconds for the dashboard to render, and saves a 1920×1080 PNG. Use `MEDIA:/path/to/screenshot.png` to deliver the image to the user.
-
-**When to use this:** User asks to "take a screenshot", "show me the dashboard", or wants visual confirmation of PatchMon state. For data queries (host lists, patch status), use the API commands above instead.
-
-## Batch patching all hosts
-
-To patch every host that has outstanding updates, combine `hosts` output with a loop:
-
-```bash
-cd /root/.hermes/skills/devops/patchmon-api
-
-# Get host IDs that have updates (python for JSON since jq may not be installed)
-python3 scripts/patchmon.py hosts 2>/dev/null | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for h in data.get('hosts', []):
-    if h.get('updates_count', 0) > 0:
-        print(f\"{h['friendly_name']}:{h['id']}\")
-" > /tmp/hosts_to_patch.txt
-
-# Trigger patch_all on each (non-blocking)
-while IFS=: read -r name hid; do
-  result=$(python3 scripts/patchmon.py patch "$hid" --no-wait 2>/dev/null)
-  run_id=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('patch_run_id','?'))" 2>/dev/null)
-  printf "%-20s run=%s\n" "$name" "$run_id"
-done < /tmp/hosts_to_patch.txt
-```
-
-Use `--no-wait` to fire them all off quickly, then schedule a cron job to check completion status ~10 min later.
-
-## When to consult references/
-
-The script and this file cover ~95% of patching work. Go to references for:
-
-- **`references/endpoints.md`** — full Integration & Application API catalog
-  (host system/network/notes/integrations/agent-queue, GetHomepage widget,
-  auto-enrollment, alerts, compliance, docker, repositories, settings). Use when
-  the user asks for non-patching data, e.g. "what's the kernel on host X" or
-  "show me Docker containers per host".
-- **`references/discrepancies.md`** — known cases where `patchmon.net/docs`
-  lists endpoints that don't exist on the deployed instance. Consult before
-  trusting any external doc that claims an endpoint like
-  `/api/v1/patches/dry-run` or `/api/v1/jobs/{id}/stream-summary`.
+- Stdlib-only Python — no `pip install` needed for the API client.
+- `screenshot.js` requires Node 18+ and a one-time Playwright install
+  (see above).
+- All paths in this file use `${HERMES_SKILL_DIR}` so the skill
+  works regardless of where it's installed.
