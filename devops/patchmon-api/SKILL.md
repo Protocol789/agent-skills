@@ -128,6 +128,10 @@ The six that actually bite:
    If you only have app credentials, use the Application API
    fallback: `GET /api/v1/dashboard/packages` with a Bearer token —
    returns all outdated packages grouped by host.
+7. **HTTP vs HTTPS.** `_poll()` previously hardcoded `HTTPSConnection`.
+   The patch now checks `parsed.scheme` and uses `HTTPConnection` for
+   plain http:// URLs. If your PatchMon runs on HTTPS, ensure certs
+   are valid (no self-signed without trust config).
 
 ### Data freshness caveat
 

@@ -251,9 +251,15 @@ def _poll(base: str, headers: dict, run_id: str) -> dict:
     last_status = None
     interval = POLL_INITIAL_INTERVAL
     parsed = urlparse(base)
-    ctx = ssl.create_default_context()
-    conn = http.client.HTTPSConnection(parsed.hostname, parsed.port or 443,
-                                       context=ctx, timeout=30)
+    if parsed.scheme == "https":
+        ctx = ssl.create_default_context()
+        conn_factory = lambda: http.client.HTTPSConnection(
+            parsed.hostname, parsed.port or 443, context=ctx, timeout=30)
+    else:
+        ctx = None
+        conn_factory = lambda: http.client.HTTPConnection(
+            parsed.hostname, parsed.port or 80, timeout=30)
+    conn = conn_factory()
     path = f"/api/v1/patching/runs/{run_id}"
     try:
         while time.time() < deadline:
@@ -264,8 +270,7 @@ def _poll(base: str, headers: dict, run_id: str) -> dict:
             except (http.client.RemoteDisconnected, OSError):
                 # Reconnect on dropped connection
                 conn.close()
-                conn = http.client.HTTPSConnection(
-                    parsed.hostname, parsed.port or 443, context=ctx, timeout=30)
+                conn = conn_factory()
                 conn.request("GET", path, headers=headers)
                 resp = conn.getresponse()
                 raw = resp.read().decode(errors="replace")
