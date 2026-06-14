@@ -9,6 +9,8 @@ metadata:
   hermes:
     tags: [DevOps, Linux, PatchManagement, PatchMon, API]
     related_skills: []
+    references:
+      - references/output-format.md
 required_environment_variables:
   - name: PATCHMON_URL
     prompt: "PatchMon base URL (e.g. https://patchmon.example.com)"
