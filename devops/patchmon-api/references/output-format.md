@@ -1,14 +1,13 @@
 ## Output Format
-Always format the security patch results using the following Markdown template. Use the color-coded indicators (🟢, 🟡, 🔴) to clearly communicate host status and include the number of patches applied.
+Always format the security patch results using the following Markdown template. You MUST format the individual host data into a single, cohesive Markdown table. Do not use bullet points for the hosts.
 
 ### 🛡️ Security Patch Report
 Summary: [X] of [Total] hosts patched successfully. [Y] queued. [Z] pending reboot.
 
 | Status | Host | Patches | Current State / Details |
 | :---: | :--- | :---: | :--- |
-| 🟢 | [Host Name] | [Count] | Completed |
-| 🟡 | [Host Name] | [Count or -] | Queued (Waiting for agent) |
-| 🔴 | [Host Name] | [Count] | Pending Reboot |
+[For every host in the data, insert a row matching the format below. Do not include markdown headers or bullet points between rows]
+| [🟢/🟡/🔴] | [Host Name] | [Count or -] | [Completed / Queued (Waiting for agent) / Pending Reboot] |
 
 > Status Indicator Rules:
 > - 🟢 Green: Completed successfully.
