@@ -38,8 +38,7 @@ required_environment_variables:
 
 PatchMon is a Linux patch-management service. This skill wraps its
 two-tier API (read-only Integration API + action-capable Application
-API) in a small CLI, plus a Playwright-based dashboard screenshot
-helper. Use the script; do not hand-roll curl.
+API) in a small CLI. Use the script; do not hand-roll curl.
 
 ## When to use
 
@@ -48,7 +47,6 @@ helper. Use the script; do not hand-roll curl.
 - Triggering a patch run (full fleet, or specific packages)
 - Dry-running a patch and approving it after review
 - Polling a run to terminal status, stopping a queued run
-- Capturing a visual screenshot of the PatchMon dashboard
 
 The bundled script handles login, polling, and SPA-HTML detection
 automatically. Every subcommand prints JSON to stdout; errors print
@@ -160,27 +158,35 @@ python3 scripts/patchmon.py run "$NEW_RUN_ID" | jq '.status, .error_message'
 `error_message` and `shell_output`. If the kernel updated, check
 `needs_reboot` in the host stats from `hosts --hostgroup <name>`.
 
-For a visual confirmation, use the screenshot helper. It logs in
-with `PATCHMON_USERNAME`/`PATCHMON_PASSWORD` and saves a 1920×1080
-PNG; emit `[[as_document]]` somewhere in your response so the
-gateway delivers the file as a downloadable attachment instead of an
-inline preview.
+## Visual confirmation (dashboard screenshot)
+
+Use Hermes Agent's native browser tools instead of the old Playwright script:
+
+1. Navigate to the login page.
+2. Fill credentials using `PATCHMON_USERNAME` / `PATCHMON_PASSWORD`.
+3. Click the sign-in button.
+4. Wait for the dashboard.
+5. Take a screenshot (the tools support capturing to file or describe).
+
+Example agent flow (in a prompt or sub-task):
 
 ```bash
-# First-time setup (Playwright + Chromium, ~300 MB into $PWD/node_modules):
-npm install playwright && npx playwright install chromium
-
-# Capture the dashboard:
-node scripts/screenshot.js /tmp/patchmon_dash.png
+# The agent uses built-in tools:
+browser_navigate url="${PATCHMON_URL}"
+browser_type ref="username-input-ref" text="${PATCHMON_USERNAME}"
+browser_type ref="password-input-ref" text="${PATCHMON_PASSWORD}"
+browser_click ref="sign-in-button-ref"
+browser_wait_for condition="networkidle"
+# Then use browser_get_images or console to capture, or describe the page.
 ```
 
-Output: `/tmp/patchmon_dash.png` → include `[[as_document]]` in the
-reply to deliver it.
+This removes all heavy dependencies. The exact refs come from `browser_snapshot`.
+
+See full browser tool docs in Hermes.
 
 ## Notes
 
 - Stdlib-only Python — no `pip install` needed for the API client.
-- `screenshot.js` requires Node 18+ and a one-time Playwright install
-  (see above).
 - All paths in this file use `${HERMES_SKILL_DIR}` so the skill
   works regardless of where it's installed.
+- Visual dashboard screenshots now use Hermes native browser tools (see above section). The legacy `scripts/screenshot.js` is deprecated and will be removed in a future version.
