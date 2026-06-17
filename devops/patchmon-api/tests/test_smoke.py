@@ -62,7 +62,7 @@ class TestHygieneConstants:
 # ---------- CLI smoke ----------
 
 EXPECTED_SUBCOMMANDS = {
-    "login", "hosts", "outdated", "patch", "approve",
+    "login", "status", "hosts", "outdated", "patch", "approve",
     "run", "runs", "stop",
 }
 
@@ -100,6 +100,66 @@ class TestCli:
         assert result.returncode == 0
 
 
+class TestParserStructure:
+    """TDD tests for solid CLI structure (groups, --version, metavars, flag order)."""
+
+    def test_version_flag_exits_zero(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(patchmon.__file__).resolve()), "--version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "patchmon" in (result.stdout + result.stderr).lower()
+
+    def test_help_mentions_host_id_metavar(self):
+        """After metavar improvement, usage should show nice HOST_ID etc."""
+        result = subprocess.run(
+            [sys.executable, str(Path(patchmon.__file__).resolve()), "patch", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert "HOST_ID" in result.stdout or "host_id" in result.stdout.lower()
+
+    def test_canonical_field_before_subcommand_is_accepted(self):
+        # Parser level: we invoke with a sub that would require auth, but we only
+        # care that argparse itself does not reject the global-before-sub form.
+        # A real auth error will happen later; we assert no "unrecognized" for --field.
+        result = subprocess.run(
+            [
+                sys.executable, str(Path(patchmon.__file__).resolve()),
+                "--field", "status", "run", "dummy-id"
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        # Should not be a pure argparse usage error about --field
+        assert "--field" not in result.stderr.lower() or "unrecognized" not in result.stderr.lower() + result.stdout.lower()
+
+    def test_field_after_on_hosts_is_now_unrecognized(self):
+        """We standardized on globals-first. Documented 'wrong' order should error at parse time."""
+        result = subprocess.run(
+            [
+                sys.executable, str(Path(patchmon.__file__).resolve()),
+                "hosts", "--pending", "--field", "0.id"
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode != 0
+        assert "unrecognized arguments" in (result.stderr + result.stdout)
+
+
+    def test_create_parser_returns_configured_parser(self):
+        """create_parser() allows direct inspection (solid CLI practice)."""
+        parser = patchmon.create_parser()
+        # Check groups and behavior via public/observable API only (format_help + parse_args)
+        help_text = parser.format_help()
+        assert "authentication options" in help_text.lower()
+        assert "output control" in help_text.lower()
+
+        # host_id appears under subparsers, so check via parse
+        ns = parser.parse_args(["--field", "foo", "patch", "abc123"])
+        assert ns.host_id == "abc123"
+        assert ns.field == "foo"
+
+
 # ---------- LLM-facing error contract ----------
 
 class TestDieContract:
@@ -122,6 +182,29 @@ class TestDieContract:
         # The error string must round-trip through JSON, not break it.
         assert "quotes" in payload["error"]
         assert "newline" in payload["error"]
+
+
+# ---------- status aggregation ----------
+
+class TestStatus:
+    def test_status_combines_hosts_and_runs(self, monkeypatch):
+        monkeypatch.setattr(
+            patchmon, "cmd_hosts",
+            lambda args: {"hosts": [{"host_id": "h1"}]},
+        )
+        monkeypatch.setattr(
+            patchmon, "cmd_runs",
+            lambda args: [{"run_id": "r1"}],
+        )
+        args = patchmon._subcommand_args(
+            patchmon.argparse.Namespace(base_url=None, token=None,
+                                        username=None, password=None),
+        )
+        result = patchmon.cmd_status(args)
+        assert result == {
+            "pending_hosts": [{"host_id": "h1"}],
+            "active_runs": [{"run_id": "r1"}],
+        }
 
 
 # ---------- TODO markers ----------
