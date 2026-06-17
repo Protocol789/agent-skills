@@ -186,7 +186,9 @@ See full browser tool docs in Hermes.
 
 ## Notes
 
-- Stdlib-only Python — no `pip install` needed for the API client.
+- The API client uses `httpx` (see `pyproject.toml`). Run
+  `pip install httpx` or `pip install -e ".[dev]"` from the skill dir
+  if the module is not already available in your environment.
 - All paths in this file use `${HERMES_SKILL_DIR}` so the skill
   works regardless of where it's installed.
 - Visual dashboard screenshots now use Hermes native browser tools (see above section). The legacy `scripts/screenshot.js` is deprecated and will be removed in a future version.

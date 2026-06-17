@@ -20,15 +20,14 @@ hermes skills install patchmon-api
 ## Test
 
 The skill ships with a minimal pytest suite covering the CLI, the
-hygiene constants, and the JWT cache. The script itself stays
-stdlib-only; `pytest` is a dev-only dependency.
+hygiene constants, and the JWT cache. The client uses `httpx` for
+async HTTP; install runtime and dev deps from `pyproject.toml`.
 
 ```bash
-# One-time: install pytest (system package or pipx, your call)
-pip install --user pytest
+cd devops/patchmon-api
+pip install -e ".[dev]"
 
 # Run the suite
-cd devops/patchmon-api
 pytest tests/ -v
 ```
 
