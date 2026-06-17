@@ -13,6 +13,7 @@ them:
 Network-touching code paths are deliberately not tested here. Add
 them in a separate `test_api.py` with mocked transport (see TODO).
 """
+
 import json
 import os
 import subprocess
@@ -23,8 +24,8 @@ import pytest
 
 import patchmon
 
-
 # ---------- paths / hygiene constants ----------
+
 
 class TestHygieneConstants:
     """Lock in the defaults we set during the PII / hygiene pass."""
@@ -43,7 +44,7 @@ class TestHygieneConstants:
             / "patchmon"
             / "token"
         )
-        assert patchmon.TOKEN_CACHE_PATH == expected
+        assert expected == patchmon.TOKEN_CACHE_PATH
 
     def test_terminal_statuses_are_a_frozenset_or_set(self):
         # The skill checks `status in TERMINAL_STATUSES`; the value must
@@ -62,8 +63,14 @@ class TestHygieneConstants:
 # ---------- CLI smoke ----------
 
 EXPECTED_SUBCOMMANDS = {
-    "login", "hosts", "outdated", "patch", "approve",
-    "run", "runs", "stop",
+    "login",
+    "hosts",
+    "outdated",
+    "patch",
+    "approve",
+    "run",
+    "runs",
+    "stop",
 }
 
 
@@ -73,7 +80,9 @@ class TestCli:
     def test_help_exits_zero(self):
         result = subprocess.run(
             [sys.executable, str(Path(patchmon.__file__).resolve()), "--help"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 0, result.stderr
         assert "usage" in result.stdout.lower()
@@ -81,7 +90,9 @@ class TestCli:
     def test_all_subcommands_listed_in_help(self):
         result = subprocess.run(
             [sys.executable, str(Path(patchmon.__file__).resolve()), "--help"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         for sub in EXPECTED_SUBCOMMANDS:
             assert sub in result.stdout, f"subcommand {sub!r} missing from --help"
@@ -90,17 +101,27 @@ class TestCli:
         """`python3 scripts/patchmon.py --help` should not crash even if
         the user forgot to set PATCHMON_* env vars."""
         env = {**os.environ}
-        for k in ("PATCHMON_URL", "PATCHMON_USERNAME", "PATCHMON_PASSWORD",
-                  "PATCHMON_KEY", "PATCHMON_SECRET", "PATCHMON_TOKEN"):
+        for k in (
+            "PATCHMON_URL",
+            "PATCHMON_USERNAME",
+            "PATCHMON_PASSWORD",
+            "PATCHMON_KEY",
+            "PATCHMON_SECRET",
+            "PATCHMON_TOKEN",
+        ):
             env.pop(k, None)
         result = subprocess.run(
             [sys.executable, str(Path(patchmon.__file__).resolve()), "--help"],
-            capture_output=True, text=True, env=env, timeout=10,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
         )
         assert result.returncode == 0
 
 
 # ---------- LLM-facing error contract ----------
+
 
 class TestDieContract:
     """`_die` is the function the agent sees when things go wrong.
@@ -126,8 +147,23 @@ class TestDieContract:
 
 # ---------- TODO markers ----------
 
-@pytest.mark.skip(reason="placeholder; fill in when network tests are added")
-def test_request_rejects_html_response_with_200():
-    """`_request` should `_die` when a 200 response body starts with `<`
-    (the SPA-HTML guard at L66-67 of patchmon.py)."""
-    raise NotImplementedError
+
+class TestParserStructure:
+    def test_create_parser_lists_all_subcommands(self):
+        parser = patchmon.create_parser()
+        subcommands: set[str] = set()
+        for action in parser._actions:
+            if action.dest == "cmd" and action.choices:
+                subcommands = set(action.choices)
+                break
+        assert subcommands >= EXPECTED_SUBCOMMANDS
+
+    def test_cli_invocation_via_shim_works(self, shim_path):
+        result = subprocess.run(
+            [sys.executable, str(shim_path), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "usage" in result.stdout.lower()

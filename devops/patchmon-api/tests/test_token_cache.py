@@ -8,20 +8,11 @@ If you ever want a fully-isolated test, monkeypatch
 `patchmon.TOKEN_CACHE_PATH` to a `tmp_path` fixture before exercising
 the cache functions.
 """
+
 import os
 import time
 
-import pytest
-
 import patchmon
-
-
-@pytest.fixture
-def isolated_token_path(tmp_path, monkeypatch):
-    """Redirect TOKEN_CACHE_PATH to a tmp dir for the duration of one test."""
-    p = tmp_path / "token"
-    monkeypatch.setattr(patchmon, "TOKEN_CACHE_PATH", p)
-    return p
 
 
 class TestTokenCache:
@@ -70,8 +61,11 @@ class TestCacheFileShape:
         assert "/tmp" not in s
         home = os.path.expanduser("~")
         xdg = os.environ.get("XDG_CACHE_HOME", "")
-        assert s.startswith(home) or s.startswith(xdg) or s.startswith("/root/.cache"), \
+        under_home = s.startswith(home) or s.startswith(xdg)
+        under_root_cache = s.startswith("/root/.cache")
+        assert under_home or under_root_cache, (
             f"cache path {s!r} not under $HOME or $XDG_CACHE_HOME"
+        )
 
     def test_cache_dir_exists_and_is_private(self):
         """The directory the script wrote during import should exist
